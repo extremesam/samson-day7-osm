@@ -1,0 +1,197 @@
+<!-- Green Map — everything green
+Single-file HTML map using Leaflet. "Everything green" with improved features over the blue map:
+- Basemap switch (OSM / Stamen Terrain)
+- Adjustable green veil intensity (slider)
+- Export snapshot via html2canvas
+- A sample GeoJSON vegetation/park layer with interactive styling
+- Accessible UI, scale, legend, improved marker styling and drop shadow
+Save as `green-map.html` and open in a browser.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Green Map — Everything Green</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    :root{
+      --green-0: #f1fbf0;
+      --green-1: #dff7df;
+      --green-2: #8ad56b;
+      --green-3: #16a34a;
+      --green-4: #064e3b;
+    }
+    html,body,#map{height:100%;margin:0;padding:0}
+    body{
+      font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+      background: linear-gradient(180deg,var(--green-0), #e6fbef);
+      color: var(--green-4);
+      -webkit-font-smoothing:antialiased;
+    }
+    #map{position:relative}
+
+    /* Subtle green tint on tiles plus richer contrast */
+    .leaflet-tile {
+      filter: grayscale(60%) brightness(1.02) sepia(15%) hue-rotate(100deg) saturate(170%);
+      transition: filter .18s ease;
+    }
+
+    /* The green veil — adjustable via JavaScript */
+    .green-veil{
+      position:absolute;inset:0;pointer-events:none;mix-blend-mode:multiply;
+      background: linear-gradient(180deg, rgba(6,78,59,0.16), rgba(34,197,94,0.08));
+      backdrop-filter: contrast(1.02) saturate(1.05);
+      transition: opacity .2s ease;
+    }
+
+    /* UI */
+    .top-ui{
+      position:absolute;left:12px;top:12px;z-index:6500;background:linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02));border-radius:10px;padding:10px 14px;border:1px solid rgba(0,0,0,0.06);
+      color:var(--green-4);backdrop-filter: blur(6px);box-shadow:0 6px 20px rgba(6,78,59,0.08);
+    }
+    .top-ui h1{font-size:16px;margin:0 0 6px 0}
+    .top-ui p{font-size:12px;margin:0;opacity:.95}
+    .controls{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;background:linear-gradient(180deg,var(--green-3),var(--green-4));color:white;border:none;cursor:pointer;font-weight:600}
+    .small{padding:6px 8px;font-size:13px}
+
+    .legend{position:absolute;right:12px;bottom:12px;background:rgba(255,255,255,0.03);padding:10px;border-radius:8px;color:var(--green-2);font-size:13px;border:1px solid rgba(0,0,0,0.04)}
+
+    /* Better marker with drop shadow */
+    .leaflet-marker-icon .marker-core{width:20px;height:20px;border-radius:50%;display:block;box-shadow:0 6px 18px rgba(3,105,42,0.12);transform:translateZ(0)}
+    .marker-core{background:linear-gradient(180deg,var(--green-2),var(--green-3));border:2px solid rgba(255,255,255,0.65)}
+    .marker-core::after{content:'';display:block;width:8px;height:8px;border-radius:50%;margin:6px auto 0;box-shadow:inset 0 2px 6px rgba(0,0,0,0.12);background:rgba(255,255,255,0.22)}
+
+    /* GeoJSON park style */
+    .park-label{font-size:12px;color:var(--green-4);font-weight:600}
+
+    /* Popup styling */
+    .leaflet-popup-content-wrapper{background:linear-gradient(180deg,rgba(250,255,250,0.98),rgba(235,255,238,0.95));color:var(--green-4)}
+
+    /* Slider styling */
+    .slider{width:160px}
+
+    @media (max-width:600px){.top-ui{left:10px;right:10px;padding:10px}}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="green-veil" id="greenVeil"></div>
+
+  <div class="top-ui" role="region" aria-label="Map controls">
+    <h1>Green Map</h1>
+    <p>Everything green — upgraded with layers, controls, and snapshot export.</p>
+    <div class="controls" aria-hidden="false">
+      <button class="btn small" id="btnCenter">Center</button>
+      <button class="btn small" id="btnSnapshot">Export Snapshot</button>
+      <label style="display:flex;align-items:center;gap:8px;" for="veilRange">Veil</label>
+      <input id="veilRange" class="slider" type="range" min="0" max="0.6" step="0.01" value="0.16" aria-label="Green intensity slider"/>
+      <select id="basemapSwitch" aria-label="Basemap switch" style="padding:6px;border-radius:8px;border:1px solid rgba(0,0,0,0.06)">
+        <option value="osm">OpenStreetMap</option>
+        <option value="terrain">Stamen Terrain</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="legend" aria-hidden="false">
+    <div style="font-weight:700;margin-bottom:6px">Legend</div>
+    <div><span style="display:inline-block;width:14px;height:10px;background:var(--green-2);margin-right:8px;border-radius:2px"></span>Vegetation / Parks</div>
+    <div style="margin-top:6px;font-size:12px;opacity:.9">Tip: move veil slider to tune the green intensity.</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script>
+    const map = L.map('map', {zoomControl: true}).setView([6.5244, 3.3792], 6);
+
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution: '&copy; OpenStreetMap contributors'});
+    const terrain = L.tileLayer('https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg', {maxZoom:18, attribution: 'Map tiles by Stamen Design'});
+
+    osm.addTo(map);
+
+    // Custom green marker icon using DivIcon for crisp vector look
+    function createGreenIcon(){
+      return L.divIcon({className: '', html: '<span class="marker-core" aria-hidden="true"></span>', iconSize: [22,22], iconAnchor: [11,11]});
+    }
+
+    // Try geolocation and add marker
+    function addUserMarker(latlng){
+      const m = L.marker(latlng, {icon:createGreenIcon()}).addTo(map);
+      m.bindPopup('<strong>You are here</strong><br/>Looking particularly verdant.');
+    }
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(pos=>{
+        const ll=[pos.coords.latitude,pos.coords.longitude];
+        map.setView(ll, 13);
+        addUserMarker(ll);
+      },()=>{
+        addUserMarker([6.5244, 3.3792]);
+      },{timeout:7000});
+    } else { addUserMarker([51.5074,-0.1278]); }
+
+    // Sample GeoJSON park/vegetation polygons (mock data)
+    const parks = {
+      "type": "FeatureCollection",
+      "features": [
+        {"type":"Feature","properties":{"name":"Emerald Park"},"geometry":{"type":"Polygon","coordinates":[[[3.3,6.6],[3.36,6.6],[3.36,6.52],[3.3,6.52],[3.3,6.6]]]}},
+        {"type":"Feature","properties":{"name":"Verdant Reserve"},"geometry":{"type":"Polygon","coordinates":[[[3.4,6.7],[3.46,6.7],[3.46,6.64],[3.4,6.64],[3.4,6.7]]]}}
+      ]
+    };
+
+    function parkStyle(feature){
+      return {color: '#10b981', weight:1, fillColor:'#34d399', fillOpacity:0.45, dashArray: ''};
+    }
+    const parkLayer = L.geoJSON(parks, {style:parkStyle, onEachFeature:(f, layer)=>{
+      layer.bindPopup('<div class="park-label">'+(f.properties.name||'Park')+'</div>');
+    }}).addTo(map);
+
+    // Basemap switch
+    document.getElementById('basemapSwitch').addEventListener('change', (e)=>{
+      const v=e.target.value;
+      if(v==='osm'){ map.removeLayer(terrain); osm.addTo(map); }
+      else { map.removeLayer(osm); terrain.addTo(map); }
+    });
+
+    // Veil slider
+    const veil = document.getElementById('greenVeil');
+    const range = document.getElementById('veilRange');
+    range.addEventListener('input', (e)=>{ veil.style.opacity = e.target.value; });
+
+    // Center button
+    document.getElementById('btnCenter').addEventListener('click', ()=>{ map.flyTo([6.5244,3.3792], 6, {duration: 1.0}); });
+
+    // Snapshot (export) using html2canvas
+    document.getElementById('btnSnapshot').addEventListener('click', async ()=>{
+      const btn = document.getElementById('btnSnapshot');
+      btn.disabled=true; btn.textContent='Rendering...';
+      try{
+        // hide UI briefly
+        document.querySelector('.top-ui').style.visibility='hidden';
+        document.querySelector('.legend').style.visibility='hidden';
+        // ensure tiles fully loaded
+        await new Promise(r => setTimeout(r, 250));
+        const canvas = await html2canvas(document.getElementById('map'), {useCORS:true, logging:false});
+        const dataUrl = canvas.toDataURL('image/png');
+        const a = document.createElement('a'); a.href=dataUrl; a.download='green-map-snapshot.png'; document.body.appendChild(a); a.click(); a.remove();
+      }catch(err){
+        console.error(err); alert('Snapshot failed — try again.');
+      } finally{
+        document.querySelector('.top-ui').style.visibility='visible';
+        document.querySelector('.legend').style.visibility='visible';
+        btn.disabled=false; btn.textContent='Export Snapshot';
+      }
+    });
+
+    // Add scale control
+    L.control.scale({metric:true,imperial:false}).addTo(map);
+
+    // Accessibility: keyboard focus for center button
+    document.getElementById('btnCenter').addEventListener('keyup', (e)=>{ if(e.key==='Enter') map.flyTo([6.5244,3.3792],6); });
+
+    // Console hint
+    console.log('Green Map ready — improved features: basemap switch, adjustable veil, GeoJSON parks, snapshot export.');
+  </script>
+</body>
+</html>
